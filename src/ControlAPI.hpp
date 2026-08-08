@@ -141,7 +141,7 @@ private:
 
   void handleStatus() {
     if (!guard()) return;
-    StaticJsonDocument<512> doc;
+    JsonDocument doc;
     doc["wifi_connected"] = _cal && _cal->wifiConnected();
     doc["ip"] = WiFi.localIP().toString();
     doc["time_synced"] = _cal && _cal->timeSynced();
@@ -152,7 +152,7 @@ private:
       doc["last_error"] = _cal->lastError();
       const CalendarEvent *next = _cal->nextEvent();
       if (next) {
-        JsonObject n = doc.createNestedObject("next_event");
+        JsonObject n = doc["next_event"].to<JsonObject>();
         n["title"] = next->title;
         n["start"] = isoLocal(next->start_epoch);
       }
@@ -171,10 +171,10 @@ private:
       _server->send(200, "application/json", "[]");
       return;
     }
-    DynamicJsonDocument doc(4096);
+    JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
     for (const auto &ev : _cal->events()) {
-      JsonObject o = arr.createNestedObject();
+      JsonObject o = arr.add<JsonObject>();
       o["title"] = ev.title;
       o["start"] = isoLocal(ev.start_epoch);
       o["reminder"] = isoLocal(ev.reminder_epoch);
@@ -202,9 +202,9 @@ private:
     if (_server->hasArg("value")) {
       vol = _server->arg("value").toInt();
     } else if (_server->hasArg("plain")) {
-      StaticJsonDocument<128> doc;
+      JsonDocument doc;
       if (deserializeJson(doc, _server->arg("plain")) == DeserializationError::Ok) {
-        if (doc.containsKey("volume")) vol = doc["volume"].as<int>();
+        if (!doc["volume"].isNull()) vol = doc["volume"].as<int>();
       }
     }
     if (vol < 0 || vol > 255) {
@@ -221,7 +221,7 @@ private:
       _server->send(400, "application/json", "{\"error\":\"missing json body\"}");
       return;
     }
-    StaticJsonDocument<512> doc;
+    JsonDocument doc;
     if (deserializeJson(doc, _server->arg("plain")) != DeserializationError::Ok) {
       _server->send(400, "application/json", "{\"error\":\"invalid json\"}");
       return;
