@@ -4,8 +4,55 @@
 
 # 概要
 
-M5Stack-AvatarをベースにシンプルにBluetoothスピーカー機能とスタックチャンのサーボコントロール機能をつけました。
+**M5Stack Core Gray (Core1) 向け** のカレンダーリマインダーアプリです。
+Wi-Fiに接続してNTPで時刻を同期し、**リモートカレンダー(iCalendar / .ics)** をダウンロードして、
+予定の時刻が近づくと **チャイム（またはWAV音源）・LED点滅・アバターの吹き出し** でお知らせします。
+さらに、カレンダーの取得/更新・音量変更・テストリマインダー・発話を行える **HTTP コントロールAPI** を搭載しています。
+
+元のBluetoothスピーカーモードはサブ機能として残していますが、
+**元々あったサーボ制御機能は削除しました（このビルドではサーボを動かしません）。**
+
 [M5Unified](https://github.com/m5stack/M5Unified)のexampleであるBluetooth_with_ESP32A2DPをベースに改造しています。
+
+## 主な変更点
+- 対象機種を **M5Stack Core Gray (`env:m5stack-grey`)** に変更。
+- **カレンダーリマインダー機能**（リモートICSの取得・解析、音とLEDと吹き出しで通知）を追加。
+- **コントロールAPI**（REST）を追加。
+- **サーボ機能を削除**。
+- 設定ファイルは `SC_BasicConfig.yaml` を維持しつつ、
+  接続設定用に **`SC_CalendarConfig.yaml`** を新規追加。
+
+## カレンダー接続設定（SC_CalendarConfig.yaml）
+SDカードの `/yaml/SC_CalendarConfig.yaml` に配置します。主な項目:
+- `wifi.ssid` / `wifi.password` : 接続するWi-Fi
+- `calendar.ics_url` : リモートカレンダー(.ics)のURL（http/https対応）
+- `calendar.poll_interval_sec` : 再取得の間隔（秒）
+- `calendar.reminder_lead_sec` : 予定の何秒前に通知するか
+- `time.gmt_offset_sec` : タイムゾーン（初期値はメキシコシティ UTC-6）
+- `reminder.*` : チャイム/発話/WAVファイル/LED点滅の設定
+- `api.enabled` / `api.port` / `api.auth_token` : コントロールAPIの設定
+
+## コントロールAPI
+`api.enabled: true` のとき、指定ポートでRESTを提供します。
+`auth_token` を設定した場合は `Authorization: Bearer <token>` が必要です。
+
+| メソッド / パス | 説明 |
+|---|---|
+| `GET  /status` | Wi-Fi/時刻/カレンダーの状態・音量・次の予定 |
+| `GET  /events` | 予定一覧 |
+| `POST /calendar/refresh` | カレンダーを再取得 |
+| `POST /volume` | 音量設定 `?value=0..255` または `{"volume":N}` |
+| `POST /speak` | `{"text":"..","expression":0..6}` を吹き出し表示 |
+| `POST /reminder/test` | テストリマインダーを実行 |
+| `GET  /update` | OTAファームウェア更新用のWebページ |
+| `POST /update` | OTAファームウェアのアップロード |
+
+## OTAアップデート（Webページ経由）
+カレンダーモードで動作中に、ブラウザで `http://<デバイスのIP>/update` を開き、
+ファームウェアの `.bin`（`.pio/build/m5stack-grey/firmware.bin`）を選んでアップロードします。
+進捗バーが表示され、完了すると自動的に再起動します。
+`api.auth_token` を設定している場合は `http://<デバイスのIP>/update?token=<token>` のように指定してください。
+16MB用パーティション(`default_16MB.csv`)はOTA用のアプリ領域を2つ持つため、更新の検証が終わるまで現行ファームは保持されます。
 
 
 # 開発環境
@@ -102,7 +149,9 @@ SDカードに`/yaml/SC_BasicConfig.yaml`を配置すると自分の設定が利
 - secret_info_show(true)<br>個人情報をログに出力するかどうか
 # 使い方
 
-- BtnA<br>Bluetoothモードに入ります。(bluetooth_mode = falseの時のみ有効)<br>
+- BtnA（シングルクリック）<br>Bluetoothスピーカーモードに入ります。（Wi-Fiとカレンダー/APIは停止します）
+
+- BtnA（ダブルクリック）<br>カレンダーモードに戻ります。（Wi-Fi再接続・カレンダー再取得・API再開）
 
 - BtnB<br>音量を下げます。
 
