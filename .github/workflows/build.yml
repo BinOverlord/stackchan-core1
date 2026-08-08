@@ -11,6 +11,11 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create (e.g. v1.0.0). Leave blank to only build."
+        required: false
+        default: ""
 
 jobs:
   build:
@@ -57,9 +62,14 @@ jobs:
           if-no-files-found: error
 
       - name: Publish Release
-        if: startsWith(github.ref, 'refs/tags/')
+        # Fires on a v* tag push, or a manual dispatch that supplies a tag.
+        # On dispatch the action creates the tag server-side at the built
+        # commit, so no local tag push is required.
+        if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.tag != '')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          target_commitish: ${{ github.sha }}
           generate_release_notes: true
           # Attach the flashable images (skip the large .elf).
           files: |
