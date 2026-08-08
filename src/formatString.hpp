@@ -1,7 +1,7 @@
 /*
 see also https://stackoverflow.com/questions/7315936/which-of-sprintf-snprintf-is-more-secure/35401865#35401865
 If you leave memory management to std::string, you don't have to free it yourself.
-formatString.hppは、snprintfのバグを解消するために必要な関数です。
+formatString.hpp provides helpers that work around snprintf pitfalls.
 */
 
 // Using template

@@ -16,7 +16,7 @@
     GET  /update            OTA firmware update web page
     POST /update            OTA firmware upload (multipart/form-data)
 
-  When api.auth_token is set in SC_CalendarConfig.yaml every request must send
+  When api.auth_token is set in SC_Config.yaml every request must send
     Authorization: Bearer <token>. Because a browser file-upload form cannot add
     that header, the OTA endpoints also accept the token as a ?token= query
     parameter.

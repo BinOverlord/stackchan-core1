@@ -1,166 +1,179 @@
-# stackchan-bluetooth-simple
+# stackchan-calendar-reminder
 
-日本語 | [English](README_en.md)
+Stack-chan as a **desktop calendar reminder** for **M5Stack Core Gray (Core1)**.
 
-# 概要
+# Overview
 
-**M5Stack Core Gray (Core1) 向け** のカレンダーリマインダーアプリです。
-Wi-Fiに接続してNTPで時刻を同期し、**リモートカレンダー(iCalendar / .ics)** をダウンロードして、
-予定の時刻が近づくと **チャイム（またはWAV音源）・LED点滅・アバターの吹き出し** でお知らせします。
-画面左上には **Wi-Fiの接続状態インジケーター** を表示します。
-さらに、カレンダーの取得/更新・音量変更・テストリマインダー・発話・OTA更新を行える **HTTP コントロールAPI** を搭載しています。
+The device connects to Wi-Fi, keeps the time in sync via NTP, downloads a
+**remote calendar** in iCalendar (`.ics`) format and announces upcoming events
+with **audio (a chime or a WAV file), an LED flash and a speech balloon** on the
+avatar. A **Wi-Fi status indicator** is shown in the top-left corner of the
+avatar screen, the current **connection status / errors** are shown in the
+speech balloon, and a built-in **HTTP control API** lets you query/refresh the
+calendar, change the volume, trigger a test reminder, make Stack-chan speak and
+update the firmware over the air.
 
-**元々あったサーボ制御機能とBluetoothスピーカー(A2DP)の音声コードは削除しました。**
-（このビルドではサーボを動かさず、Bluetoothスピーカーにもなりません。）
+**The servo control and the Bluetooth speaker (A2DP) audio code** that the
+original sketch shipped with **have both been removed** – this build drives no
+servo and is not a Bluetooth speaker.
 
-[M5Unified](https://github.com/m5stack/M5Unified)のexampleであるBluetooth_with_ESP32A2DPをベースに改造しています。
+Based on the `Bluetooth_with_ESP32A2DP` example from
+[M5Unified](https://github.com/m5stack/M5Unified).
 
-## 主な変更点
-- 対象機種を **M5Stack Core Gray (`env:m5stack-grey`)** に変更。
-- **カレンダーリマインダー機能**（リモートICSの取得・解析、音とLEDと吹き出しで通知）を追加。
-- 画面に **Wi-Fi接続状態インジケーター** を追加。
-- **コントロールAPI**（REST + OTA更新）を追加。
-- **サーボ機能** と **Bluetoothスピーカー(A2DP)音声** を削除。
-- 設定ファイルは `SC_BasicConfig.yaml` を維持しつつ、
-  接続設定用に **`SC_CalendarConfig.yaml`** を新規追加。
-
-## カレンダー接続設定（SC_CalendarConfig.yaml）
-SDカードの `/yaml/SC_CalendarConfig.yaml` に配置します。主な項目:
-- `wifi.ssid` / `wifi.password` : 接続するWi-Fi
-- `calendar.ics_url` : リモートカレンダー(.ics)のURL（http/https対応）
-- `calendar.poll_interval_sec` : 再取得の間隔（秒）
-- `calendar.reminder_lead_sec` : 予定の何秒前に通知するか
-- `time.gmt_offset_sec` : タイムゾーン（初期値はメキシコシティ UTC-6）
-- `reminder.*` : チャイム/発話/WAVファイル/LED点滅の設定
-- `api.enabled` / `api.port` / `api.auth_token` : コントロールAPIの設定
-
-## コントロールAPI
-`api.enabled: true` のとき、指定ポートでRESTを提供します。
-`auth_token` を設定した場合は `Authorization: Bearer <token>` が必要です。
-
-| メソッド / パス | 説明 |
-|---|---|
-| `GET  /status` | Wi-Fi/時刻/カレンダーの状態・音量・次の予定 |
-| `GET  /events` | 予定一覧 |
-| `POST /calendar/refresh` | カレンダーを再取得 |
-| `POST /volume` | 音量設定 `?value=0..255` または `{"volume":N}` |
-| `POST /speak` | `{"text":"..","expression":0..6}` を吹き出し表示 |
-| `POST /reminder/test` | テストリマインダーを実行 |
-| `GET  /update` | OTAファームウェア更新用のWebページ |
-| `POST /update` | OTAファームウェアのアップロード |
-
-## OTAアップデート（Webページ経由）
-カレンダーモードで動作中に、ブラウザで `http://<デバイスのIP>/update` を開き、
-ファームウェアの `.bin`（`.pio/build/m5stack-grey/firmware.bin`）を選んでアップロードします。
-進捗バーが表示され、完了すると自動的に再起動します。
-`api.auth_token` を設定している場合は `http://<デバイスのIP>/update?token=<token>` のように指定してください。
-16MB用パーティション(`default_16MB.csv`)はOTA用のアプリ領域を2つ持つため、更新の検証が終わるまで現行ファームは保持されます。
-
-
-# 開発環境
+# Development Environment
 - VSCode
 - PlatformIO
 
-# 対応機種
+# Supported Model
 
-- M5Stack Basic/Gray/M5Go<br>BasicはFlashメモリが16MBの機種のみです。
+- **M5Stack Core Gray (Core1)** – primary target (`env:m5stack-grey`).
+  M5Stack Basic (16MB Flash) also works with the same env.
 
-- M5Stack Fire
+Other envs (Core2 / Fire / Core-ESP32) are still present in `platformio.ini`
+and will build, but the calendar reminder + control API feature is developed
+and tuned for the Core Gray.
 
-- M5Stack Core2 / Core2 for AWSIoT
-
-# 必要なライブラリ
-Arduino-ESP32は2.0.4(Fireのみ2.0.0)で動作確認しています。M5Stack Fireはarduino-esp32v2.0.4だと不具合があり起動しません。
-
-詳しいバージョンについては[platformio.ini](https://github.com/mongonta0716/stackchan-bluetooth-simple/blob/main/platformio.ini)を見てください。
+# Required Libraries
 
 - [M5Stack-Avatar](https://github.com/meganetaaan/m5stack-avatar)
-
-- [ESP8266Audio](https://github.com/earlephilhower/ESP8266Audio)
-
 - [stackchan-arduino](https://github.com/mongonta0716/stackchan-arduino)
+- [ArduinoJson](https://arduinojson.org/) 7.x (control API responses)
+- [FastLED](https://github.com/FastLED/FastLED) (GoBottom LEDs)
+- WiFi / HTTPClient / WebServer / Update (bundled with the ESP32 Arduino core)
 
-# コンパイル時の注意
+See [platformio.ini](platformio.ini) for exact versions.
 
-- M5Stack Fire V2.6/M5Stack Basic V2.6<br>TFカードを使用する際にSD.begin()を20MHz以上では読み込めない事象を確認しました。15MHzに下げています。
+# Configuration
 
-- M5Stack Basic V2.6<br>VSCode+PlatformIOでコンパイルするときのenvは`env:m5stack-grey`を選択してください。
+A **single** YAML file holds every firmware setting. Copy it to the SD card as
+`/yaml/SC_Config.yaml` (see [data/yaml/SC_Config.yaml](data/yaml/SC_Config.yaml)).
+It is read by both the stackchan-arduino config loader (speaker volume, balloon
+font, LEDs) and by this firmware (Wi-Fi, calendar, reminder, control API). If
+the file is missing, defaults are used and the calendar feature stays disabled
+until at least the Wi-Fi SSID and the calendar URL are provided.
 
-# 設定
-SDカードに設定用のYAMLファイルがないとデフォルト値を利用します。（PortAへサーボを接続する設定になっています。）
-SDカードに`/yaml/SC_BasicConfig.yaml`を配置すると自分の設定が利用できます。
+The calendar-related part of the file looks like this:
 
-**2022/10/18にJSONからYAMLへ変更しました。JSONからYAMLへのコンバートは[JSON から YAML コンバータ](https://www.site24x7.com/ja/tools/json-to-yaml.html)にて可能です。**<br>コメントの扱いが変わっているので注意してください。
-**2025/03/24にstackchan-arduinoライブラリを使用するように変更しました。SC_Config.yamlの内容を元にSC_BasicConfig.yamlを作成してください。**
+```yaml
+wifi:
+  ssid: "your-wifi-ssid"
+  password: "your-wifi-password"
+  connect_timeout_sec: 20
 
-詳しくは[YAMLファイル](https://github.com/mongonta0716/stackchan-bluetooth-simple/blob/main/data/yaml/SC_BasicConfig.yaml)を参照してください。
+calendar:
+  ics_url: "https://example.com/basic.ics"  # any public/secret .ics feed
+  poll_interval_sec: 300                     # how often to re-download
+  reminder_lead_sec: 300                     # fire this long before the event
+  max_events: 20
 
-## 設定項目
-(カッコ内)は初期値
-- servo
-    - pin
-        - x(Core1 22, Core2 33, CoreS3 1)<br> X軸のGPIOを指定(シリアルサーボの場合はRX)
-        - y(Core1 21, Core2 32, CoreS3 2)<br> Y軸のGPIOを指定(シリアルサーボの場合はTX)
-    - offset<br>サーボの軸が90°にしたときにズレを修正するパラメータ
-        - x(0)<br> X軸のオフセット値を設定
-        - y(0)<br> Y軸のオフセット値を設定
-    - center<br>サーボの中心位置を指定
-        - x(180)<br> X軸の中心位置
-        - y(270)<br> Y軸の中心位置
-    - lower_limit<br>サーボの下限値を指定
-        - x(0)<br> X軸の下限値
-        - y(240)<br> Y軸の下限値
-    - upper_limit<br>サーボの上限値を指定
-        - x(360)<br> X軸の上限値
-        - y(280)<br> Y軸の上限値
-    - speed<br>待機時とBluetoothスピーカーで音が出ているときの待機時間とサーボの移動時間を指定します。最小値と最大値で範囲を指定して、ランダムの値を使用します。
-        - normal_mode
-             - interval_min(3000)
-             - interval_max(6000)
-             - move_min(500)
-             - move_max(1500)
-        - sing_mode
-             - interval_min(500)
-             - interval_max(1000)
-             - move_min(500)
-             - move_max(1000)
-- bluetooth
-    - device_name(M5Stack)<br>Bluetoothスピーカーのデバイス名を指定します。
-    - starting_state(false)<br>起動時にBluetoothモードにするかどうかを指定します。
-    - start_volume(100)<br>Bluetoothスピーカーの初期値を設定
+time:
+  ntp_server: "pool.ntp.org"
+  gmt_offset_sec: -21600                      # default: Mexico City (UTC-6)
+  daylight_offset_sec: 0
 
-- auto_power_off_time(0)<br>Core2のみ。USBの電源供給がOFFになったあと設定した時間が経過すると電源OFFになります。（0は電源OFFしない）
+reminder:
+  tone_enabled: true
+  speak_enabled: true
+  chime_repeat: 2
+  sound_file: ""                              # optional WAV on SD, e.g. /sound/reminder.wav
+  led_flash: true
 
-- balloon<br>吹き出しの設定をします。
-    - font_language("CN")<br>フォントの言語を指定します。"JA"か"CN"、指定しないとラテンフォントを使用します。
-    - lyrics<br>ノーマルモード時にランダムで表示するセリフを設定します。最大10個まで。
-- led_lr(0)<br>GoBottom1/2で音量に対応してLEDが光るようになります。※ソースの書き換えとコンパイルが必要。
-    - 0: ステレオ
-    - 1: 左の音量のみに反応
-    - 2: 右の音量のみに反応
-- led_pin(15)<br>LEDのGPIOピン番号を指定（GoBottom1: 15, GoBottom2: 25）
-- takao_base(false)<br>[Stack-chan_Takao_Base](https://ssci.to/8905)を使用するかどうかの設定。(※現在対応しているのはCore2のみ)
-- servo_type("DYN_XL330")<br>サーボの種類を指定
-    - "PWM": SG90系のPWMサーボ
-    - "SCS": Feetech SCS0009 シリアルサーボ
-    - "DYN_XL330": Dynamixel XL330 シリアルサーボ
-- extend_config_filename("")<br>アプリケーション用の設定ファイル名
-- extend_config_filesize(2048)<br>機能拡張用のバッファサイズ
-- secret_config_filename("")<br>個人情報用の設定ファイル名
-- secret_config_filesize(2048)<br>個人情報用のバッファサイズ
-- secret_info_show(true)<br>個人情報をログに出力するかどうか
-# Wi-Fi状態インジケーター
-画面左上に信号バーを表示します。
-- **緑のバー**：接続済み。バーの本数はRSSI（電波強度）を表します。
-- **赤のバー＋斜線**：未接続。
+api:
+  enabled: true
+  port: 80
+  auth_token: ""                              # optional Bearer token
+```
 
-# 使い方
+The `ics_url` works with any iCalendar feed, for example Google Calendar's
+"Secret address in iCal format", or a published Outlook / Nextcloud / iCloud
+calendar. Both `http://` and `https://` URLs are supported (TLS certificates are
+not verified).
 
-- BtnA<br>リモートカレンダーを手動で再取得します。
+> Note: recurring events (`RRULE`) are read as their single `DTSTART`
+> occurrence; per-occurrence expansion is not performed on the device.
 
-- BtnB<br>音量を下げます。
+# On-screen status
 
-- BtnC<br>音量を上げます。
+- **Wi-Fi indicator** (top-left corner): green signal bars when connected (the
+  number of lit bars reflects the RSSI: 4 bars ≥ −55 dBm, 3 ≥ −65, 2 ≥ −75,
+  1 otherwise), or red bars with a slash when not connected.
+- **Status balloon**: shows the current state / error, e.g. `WiFi disconnected`,
+  `Time not synced`, `Cal error: <reason>`, or `Next: <event title>` /
+  `Calendar OK (N)` when everything is healthy. A reminder or a manual refresh
+  temporarily takes over the balloon.
+
+# Control API
+
+When `api.enabled` is `true` the device serves a small REST API on the
+configured port. If `auth_token` is set, every request must send
+`Authorization: Bearer <token>`.
+
+| Method & path | Description |
+|---------------|-------------|
+| `GET  /` | Human-readable help. |
+| `GET  /status` | Wi-Fi/time/calendar status, RSSI, volume, next event (JSON). |
+| `GET  /events` | Upcoming events with start/reminder times (JSON). |
+| `POST /calendar/refresh` | Re-download the remote calendar now. |
+| `POST /volume` | Set volume: `?value=0..255` or body `{"volume":N}`. |
+| `POST /speak` | Body `{"text":"..","expression":0..6}` – show text on the avatar. |
+| `POST /reminder/test` | Fire a test reminder (chime + balloon + LED). |
+| `GET  /update` | OTA firmware update web page (upload a `.bin`). |
+| `POST /update` | OTA firmware upload (`multipart/form-data`). |
+
+Examples:
+
+```sh
+curl http://<device-ip>/status
+curl -X POST http://<device-ip>/calendar/refresh
+curl -X POST "http://<device-ip>/volume?value=120"
+curl -X POST http://<device-ip>/speak -d '{"text":"Hello!","expression":0}'
+curl -X POST http://<device-ip>/reminder/test
+```
+
+Avatar expression values: `0` Happy, `1` Angry, `2` Sad, `3` Doubt, `4` Sleepy,
+`5` Neutral.
+
+# OTA firmware update (via web page)
+
+The firmware can update itself over Wi-Fi — no USB cable needed after the first
+flash. Open:
+
+```
+http://<device-ip>/update
+```
+
+Pick a firmware `.bin` and press **Upload**; a progress bar is shown and the
+device reboots automatically when the update finishes. If `api.auth_token` is
+set, append it as a query parameter: `http://<device-ip>/update?token=<token>`
+(a plain browser upload form cannot send the `Authorization` header).
+
+Which `.bin` to upload: the application image built by PlatformIO, i.e.
+`.pio/build/m5stack-grey/firmware.bin` (also attached to each GitHub Release).
+The 16MB partition layout (`default_16MB.csv`) keeps two OTA app slots, so the
+running firmware is preserved until the new image is verified.
+
+You can also push builds straight from PlatformIO over the network with
+`espota` — see the commented `upload_protocol`/`upload_port` lines in
+[platformio.ini](platformio.ini).
+
+# Building the firmware
+
+```sh
+pio run -e m5stack-grey                 # build  -> .pio/build/m5stack-grey/firmware.bin
+pio run -e m5stack-grey -t upload       # flash over USB (first time)
+pio run -e m5stack-grey -t uploadfs     # upload the /data (YAML) filesystem image
+```
+
+CI (`.github/workflows/build.yml`) builds the firmware on every push and
+uploads it as an artifact. Pushing a `v*` tag (or running the workflow manually
+with a `tag` input) publishes a **GitHub Release** with `firmware.bin`,
+`bootloader.bin` and `partitions.bin` attached.
+
+# Usage (buttons)
+
+- **BtnA**: refresh the remote calendar now.
+- **BtnB**: decrease volume.
+- **BtnC**: increase volume.
 
 # Credit
 - [meganetaaan](https://github.com/meganetaaan)
@@ -173,6 +186,3 @@ SDカードに`/yaml/SC_BasicConfig.yaml`を配置すると自分の設定が利
 
 # Author
 [Takao Akaki](https://github.com/mongonta0716)
-
-
-

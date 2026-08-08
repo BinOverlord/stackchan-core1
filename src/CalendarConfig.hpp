@@ -1,12 +1,15 @@
 /*
   CalendarConfig.hpp
 
-  Loads /yaml/SC_CalendarConfig.yaml (Wi-Fi, remote calendar, NTP and control
-  API settings) for the calendar reminder feature.
+  Reads the Wi-Fi, remote calendar, NTP and control-API settings for the
+  calendar reminder feature out of the single firmware config file
+  (/yaml/SC_Config.yaml). Only the wifi / calendar / time / reminder / api
+  sections are used here; the stackchan-arduino loader reads the rest of the
+  same file.
 
   A tiny purpose built line reader is used instead of a full YAML library so the
   feature stays self contained. The expected structure is a two level tree with
-  2-space indentation and `key: value` pairs (see SC_CalendarConfig.yaml).
+  2-space indentation and `key: value` pairs (see SC_Config.yaml).
 */
 #ifndef CALENDAR_CONFIG_HPP_
 #define CALENDAR_CONFIG_HPP_

@@ -63,6 +63,7 @@ public:
     }
     if (wifiConnected()) {
       Serial.printf("[Calendar] Wi-Fi connected, IP: %s\n", WiFi.localIP().toString().c_str());
+      _last_error = "";
       return true;
     }
     _last_error = "wifi connect failed";
@@ -78,6 +79,7 @@ public:
     for (int i = 0; i < 20; i++) {
       if (time(nullptr) > 1609459200) {  // 2021-01-01
         _time_synced = true;
+        _last_error = "";
         return true;
       }
       delay(250);
@@ -130,6 +132,7 @@ public:
     finalize(parsed);
     _events.swap(parsed);
     _last_refresh = time(nullptr);
+    _last_error = "";
     Serial.printf("[Calendar] refresh done, %d upcoming event(s).\n", (int)_events.size());
     return true;
   }
