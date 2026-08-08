@@ -13,9 +13,13 @@
     POST /volume            set volume  (?value=0..255 or JSON {"volume":N})
     POST /speak             show text    (JSON {"text":"..","expression":0..6})
     POST /reminder/test     fire a test reminder chime
+    GET  /update            OTA firmware update web page
+    POST /update            OTA firmware upload (multipart/form-data)
 
   When api.auth_token is set in SC_CalendarConfig.yaml every request must send
-    Authorization: Bearer <token>
+    Authorization: Bearer <token>. Because a browser file-upload form cannot add
+    that header, the OTA endpoints also accept the token as a ?token= query
+    parameter.
 */
 #ifndef CONTROL_API_HPP_
 #define CONTROL_API_HPP_
@@ -23,6 +27,7 @@
 #include <Arduino.h>
 #include <WebServer.h>
 #include <ArduinoJson.h>
+#include <Update.h>
 #include <functional>
 
 #include "CalendarClient.hpp"
@@ -56,6 +61,11 @@ public:
     _server->on("/volume", HTTP_POST, [this]() { handleVolume(); });
     _server->on("/speak", HTTP_POST, [this]() { handleSpeak(); });
     _server->on("/reminder/test", HTTP_POST, [this]() { handleTestReminder(); });
+    // OTA firmware update: GET serves the page, POST receives the upload.
+    _server->on("/update", HTTP_GET, [this]() { handleUpdatePage(); });
+    _server->on("/update", HTTP_POST,
+                [this]() { handleUpdateResult(); },
+                [this]() { handleUpdateUpload(); });
     _server->onNotFound([this]() { _server->send(404, "application/json", "{\"error\":\"not found\"}"); });
 
     // WebServer only keeps headers we explicitly ask for.
@@ -99,6 +109,14 @@ private:
     return false;
   }
 
+  // OTA can be authorized either with the bearer header or a ?token= query
+  // argument, because a plain HTML upload form cannot set custom headers.
+  bool otaAuthorized() {
+    if (_auth_token.length() == 0) return true;
+    if (authorized()) return true;
+    return _server->hasArg("token") && _server->arg("token") == _auth_token;
+  }
+
   static String isoLocal(time_t epoch) {
     if (epoch <= 0) return "";
     struct tm tm_info;
@@ -116,7 +134,8 @@ private:
       "POST /calendar/refresh  re-download the remote calendar\n"
       "POST /volume            ?value=0..255 or {\"volume\":N}\n"
       "POST /speak             {\"text\":\"..\",\"expression\":0..6}\n"
-      "POST /reminder/test     fire a test reminder\n";
+      "POST /reminder/test     fire a test reminder\n"
+      "GET  /update            OTA firmware update web page\n";
     _server->send(200, "text/plain", body);
   }
 
@@ -218,6 +237,86 @@ private:
     if (testReminder) testReminder();
     _server->send(200, "application/json", "{\"ok\":true}");
   }
+
+  // --- OTA firmware update -------------------------------------------------
+
+  void handleUpdatePage() {
+    if (!otaAuthorized()) { _server->send(401, "text/plain", "unauthorized"); return; }
+    // The token (if any) is forwarded on the form action so the POST is authorized.
+    String action = "/update";
+    if (_server->hasArg("token")) action += "?token=" + _server->arg("token");
+    String html =
+      "<!doctype html><html><head><meta charset=\"utf-8\">"
+      "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+      "<title>Stack-chan OTA Update</title>"
+      "<style>body{font-family:sans-serif;max-width:520px;margin:40px auto;padding:0 16px}"
+      "h1{font-size:1.3rem}#bar{width:100%;background:#eee;border-radius:6px;overflow:hidden;height:22px;display:none}"
+      "#fill{height:100%;width:0;background:#4a90d9;color:#fff;text-align:center;font-size:12px;line-height:22px}"
+      "input[type=file]{margin:12px 0}button{padding:8px 18px;font-size:1rem}</style></head><body>"
+      "<h1>Stack-chan Firmware Update (OTA)</h1>"
+      "<p>Select a firmware <code>.bin</code> and press Upload. "
+      "The device reboots automatically when the update completes.</p>"
+      "<form id=\"f\" method=\"POST\" action=\"" + action + "\" enctype=\"multipart/form-data\">"
+      "<input type=\"file\" name=\"firmware\" accept=\".bin\" required><br>"
+      "<button type=\"submit\">Upload</button></form>"
+      "<div id=\"bar\"><div id=\"fill\">0%</div></div><p id=\"msg\"></p>"
+      "<script>"
+      "var f=document.getElementById('f');"
+      "f.onsubmit=function(e){e.preventDefault();"
+      "var x=new XMLHttpRequest();x.open('POST',f.action);"
+      "document.getElementById('bar').style.display='block';"
+      "x.upload.onprogress=function(ev){if(ev.lengthComputable){var p=Math.round(ev.loaded/ev.total*100);"
+      "var fl=document.getElementById('fill');fl.style.width=p+'%';fl.textContent=p+'%';}};"
+      "x.onload=function(){document.getElementById('msg').textContent=x.responseText;};"
+      "x.onerror=function(){document.getElementById('msg').textContent='Upload failed.';};"
+      "x.send(new FormData(f));};"
+      "</script></body></html>";
+    _server->send(200, "text/html", html);
+  }
+
+  // Called once the whole upload has been received.
+  void handleUpdateResult() {
+    if (!otaAuthorized()) { _server->send(401, "text/plain", "unauthorized"); return; }
+    if (Update.hasError()) {
+      _server->send(500, "text/plain", "Update FAILED: " + String(_update_error));
+      return;
+    }
+    _server->send(200, "text/plain", "Update OK. Rebooting...");
+    delay(500);
+    ESP.restart();
+  }
+
+  // Called repeatedly as chunks of the firmware arrive.
+  void handleUpdateUpload() {
+    HTTPUpload &upload = _server->upload();
+    if (upload.status == UPLOAD_FILE_START) {
+      if (!otaAuthorized()) { _update_error = "unauthorized"; return; }
+      Serial.printf("[OTA] start: %s\n", upload.filename.c_str());
+      _update_error = "";
+      // UPDATE_SIZE_UNKNOWN lets the library size the target app partition.
+      if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+        _update_error = "begin failed";
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+        _update_error = "write failed";
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_END) {
+      if (Update.end(true)) {  // true: set the boot partition to the new image
+        Serial.printf("[OTA] success: %u bytes\n", (unsigned)upload.totalSize);
+      } else {
+        _update_error = "end failed";
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_ABORTED) {
+      Update.abort();
+      _update_error = "aborted";
+    }
+  }
+
+  String _update_error = "";
 };
 
 #endif  // CONTROL_API_HPP_

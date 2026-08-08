@@ -44,6 +44,15 @@ SDカードの `/yaml/SC_CalendarConfig.yaml` に配置します。主な項目:
 | `POST /volume` | 音量設定 `?value=0..255` または `{"volume":N}` |
 | `POST /speak` | `{"text":"..","expression":0..6}` を吹き出し表示 |
 | `POST /reminder/test` | テストリマインダーを実行 |
+| `GET  /update` | OTAファームウェア更新用のWebページ |
+| `POST /update` | OTAファームウェアのアップロード |
+
+## OTAアップデート（Webページ経由）
+カレンダーモードで動作中に、ブラウザで `http://<デバイスのIP>/update` を開き、
+ファームウェアの `.bin`（`.pio/build/m5stack-grey/firmware.bin`）を選んでアップロードします。
+進捗バーが表示され、完了すると自動的に再起動します。
+`api.auth_token` を設定している場合は `http://<デバイスのIP>/update?token=<token>` のように指定してください。
+16MB用パーティション(`default_16MB.csv`)はOTA用のアプリ領域を2つ持つため、更新の検証が終わるまで現行ファームは保持されます。
 
 
 # 開発環境

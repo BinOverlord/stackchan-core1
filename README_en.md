@@ -109,6 +109,8 @@ configured port. If `auth_token` is set, every request must send
 | `POST /volume` | Set volume: `?value=0..255` or body `{"volume":N}`. |
 | `POST /speak` | Body `{"text":"..","expression":0..6}` – show text on the avatar. |
 | `POST /reminder/test` | Fire a test reminder (chime + balloon + LED). |
+| `GET  /update` | OTA firmware update web page (upload a `.bin`). |
+| `POST /update` | OTA firmware upload (`multipart/form-data`). |
 
 Examples:
 
@@ -122,6 +124,40 @@ curl -X POST http://<device-ip>/reminder/test
 
 Avatar expression values: `0` Happy, `1` Angry, `2` Sad, `3` Doubt, `4` Sleepy,
 `5` Neutral.
+
+# OTA firmware update (via web page)
+
+The firmware can update itself over Wi-Fi — no USB cable needed after the first
+flash. In **Calendar mode**, open:
+
+```
+http://<device-ip>/update
+```
+
+Pick a firmware `.bin` and press **Upload**; a progress bar is shown and the
+device reboots automatically when the update finishes. If `api.auth_token` is
+set, append it as a query parameter: `http://<device-ip>/update?token=<token>`
+(a plain browser upload form cannot send the `Authorization` header).
+
+Which `.bin` to upload: the application image built by PlatformIO, i.e.
+`.pio/build/m5stack-grey/firmware.bin`. The 16MB partition layout
+(`default_16MB.csv`) keeps two OTA app slots, so the running firmware is
+preserved until the new image is verified.
+
+You can also push builds straight from PlatformIO over the network with
+`espota` — see the commented `upload_protocol`/`upload_port` lines in
+[platformio.ini](platformio.ini).
+
+## Building the firmware
+
+```sh
+pio run -e m5stack-grey                 # build  -> .pio/build/m5stack-grey/firmware.bin
+pio run -e m5stack-grey -t upload       # flash over USB (first time)
+pio run -e m5stack-grey -t uploadfs     # upload the /data (YAML) filesystem image
+```
+
+A GitHub Actions workflow (`.github/workflows/build.yml`) also builds the
+firmware on every push and uploads `firmware.bin` as a downloadable artifact.
 
 # Usage (buttons)
 
