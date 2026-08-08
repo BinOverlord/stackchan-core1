@@ -40,7 +40,6 @@ public:
   std::function<void(const String &, int)> speak = nullptr;  // (text, expression)
   std::function<void()> testReminder = nullptr;
   std::function<bool()> refreshCalendar = nullptr;
-  std::function<bool()> bluetoothMode = nullptr;
 
   ControlAPI() {}
 
@@ -158,7 +157,7 @@ private:
       }
     }
     if (getVolume) doc["volume"] = getVolume();
-    if (bluetoothMode) doc["bluetooth_mode"] = bluetoothMode();
+    doc["rssi"] = (WiFi.status() == WL_CONNECTED) ? WiFi.RSSI() : 0;
 
     String out;
     serializeJson(doc, out);

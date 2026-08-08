@@ -9,12 +9,14 @@ Stack-chan as a **desktop calendar reminder** for **M5Stack Core Gray (Core1)**.
 The device connects to Wi-Fi, keeps the time in sync via NTP, downloads a
 **remote calendar** in iCalendar (`.ics`) format and announces upcoming events
 with **audio (a chime or a WAV file), an LED flash and a speech balloon** on the
-avatar. A built-in **HTTP control API** lets you query/refresh the calendar,
-change the volume, trigger a test reminder and make Stack-chan speak.
+avatar. A **Wi-Fi status indicator** is shown in the top-left corner of the
+avatar screen, and a built-in **HTTP control API** lets you query/refresh the
+calendar, change the volume, trigger a test reminder, make Stack-chan speak and
+update the firmware over the air.
 
-The original Bluetooth speaker mode is kept as a secondary mode. **The servo
-control that the original sketch shipped with has been removed** – this build
-does not drive any servo.
+**The servo control and the Bluetooth speaker (A2DP) audio code** that the
+original sketch shipped with **have both been removed** – this build drives no
+servo and is not a Bluetooth speaker.
 
 Based on the `Bluetooth_with_ESP32A2DP` example from
 [M5Unified](https://github.com/m5stack/M5Unified).
@@ -159,12 +161,17 @@ pio run -e m5stack-grey -t uploadfs     # upload the /data (YAML) filesystem ima
 A GitHub Actions workflow (`.github/workflows/build.yml`) also builds the
 firmware on every push and uploads `firmware.bin` as a downloadable artifact.
 
+# Wi-Fi status indicator
+
+The top-left corner of the avatar screen shows a small signal-bar indicator:
+
+- **Green bars** – connected; the number of lit bars reflects the RSSI
+  (4 bars ≥ −55 dBm, 3 ≥ −65, 2 ≥ −75, 1 otherwise).
+- **Red bars with a slash** – not connected.
+
 # Usage (buttons)
 
-- **BtnA – single click**: switch to **Bluetooth speaker** mode (Wi-Fi and the
-  calendar/API are stopped, because Bluetooth Classic and Wi-Fi share the radio).
-- **BtnA – double click**: switch back to **Calendar** mode (Wi-Fi reconnects,
-  the calendar is refreshed and the control API restarts).
+- **BtnA**: refresh the remote calendar now.
 - **BtnB**: decrease volume.
 - **BtnC**: increase volume.
 
