@@ -5,11 +5,13 @@
 //   * downloads a remote calendar (iCalendar / .ics),
 //   * announces upcoming events with a chime, an LED flash and a speech
 //     balloon on the avatar,
+//   * shows a Wi-Fi status indicator on the avatar screen,
 //   * exposes an HTTP control API to query/refresh the calendar, change the
-//     volume, trigger a test reminder and make Stack-chan speak.
+//     volume, trigger a test reminder, make Stack-chan speak and update the
+//     firmware over the air.
 //
-// It also keeps the original Bluetooth speaker mode. The servo control that the
-// original sketch shipped with has been removed (this build has no servo).
+// The servo control and the Bluetooth speaker (A2DP) audio code that the
+// original sketch shipped with have both been removed.
 //
 // Based on the Bluetooth_with_ESP32A2DP example from M5Unified.
 // Copyright (c) 2022 Takao Akaki
@@ -17,8 +19,8 @@
 #include <Arduino.h>
 
 #include <SD.h>
+#include <WiFi.h>
 #include <M5Unified.h>
-#include "BluetoothA2DPSink_M5Speaker.hpp"
 #include "Avatar.h"
 
 #include "CalendarConfig.hpp"
@@ -106,7 +108,6 @@ ControlAPI control_api;
 const unsigned long powericon_interval = 3000;  // バッテリーアイコンを更新する間隔(msec)
 unsigned long last_powericon_millis = 0;
 
-bool bluetooth_mode = false;
 bool calendar_services_running = false;
 unsigned long last_calendar_poll_millis = 0;
 
@@ -115,88 +116,15 @@ const unsigned long reminder_display_ms = 30000;
 unsigned long reminder_shown_millis = 0;
 bool reminder_showing = false;
 
-// --------------------
-// Avatar関連の初期設定
-#define LIPSYNC_LEVEL_MAX 10.0f
-static float lipsync_level_max = LIPSYNC_LEVEL_MAX; // リップシンクの上限初期値
-float mouth_ratio = 0.0f;
-bool sing_happy = true;
-ColorPalette *cps;
-// Avatar関連の設定 end
-// --------------------
+// Wi-Fi status indicator (drawn on the avatar screen).
+const unsigned long wifi_indicator_interval = 2000;
+unsigned long last_wifi_indicator_millis = 0;
+int last_wifi_indicator_state = -99;  // force first draw
 
-uint32_t last_discharge_time = 0;  // USB給電が止まったときの時間(msec)
+ColorPalette *cps;
 
 /// set M5Speaker virtual channel (0-7)
 static constexpr uint8_t m5spk_virtual_channel = 0;
-
-static BluetoothA2DPSink_M5Speaker a2dp_sink = { &M5.Speaker, m5spk_virtual_channel };
-static fft_t fft;
-static constexpr size_t WAVE_SIZE = 320;
-static int16_t raw_data[WAVE_SIZE * 2];
-
-void lipSync(void *args)
-{
-  DriveContext *ctx = (DriveContext *)args;
-  Avatar *avatar = ctx->getAvatar();
-  while (avatar->isDrawing())
-  {
-    uint64_t level = 0;
-    auto buf = a2dp_sink.getBuffer();
-    if (buf) {
-#ifdef USE_LED
-      // buf[0]: LEFT
-      // buf[1]: RIGHT
-      switch(system_config.getLedLR()) {
-        case 1: // Left Only
-          level_led(abs(buf[0])*10/INT16_MAX,abs(buf[0])*10/INT16_MAX);
-          break;
-        case 2: // Right Only
-          level_led(abs(buf[1])*10/INT16_MAX,abs(buf[1])*10/INT16_MAX);
-          break;
-        default: // Stereo
-          level_led(abs(buf[1])*10/INT16_MAX,abs(buf[0])*10/INT16_MAX);
-          break;
-      }
-#endif
-
-      memcpy(raw_data, buf, WAVE_SIZE * 2 * sizeof(int16_t));
-      fft.exec(raw_data);
-      for (size_t bx = 5; bx <= 60; ++bx) { // リップシンクで抽出する範囲はここで指定(低音)0〜64（高音）
-        int32_t f = fft.get(bx);
-        level += abs(f);
-      }
-    }
-
-    mouth_ratio = (float)(level >> 16)/lipsync_level_max;
-    if (mouth_ratio > 1.2f) {
-      if (mouth_ratio > 1.5f) {
-        lipsync_level_max += 10.0f; // リップシンク上限を大幅に超えるごとに上限を上げていく。
-      }
-      mouth_ratio = 1.2f;
-    }
-    avatar->setMouthOpenRatio(mouth_ratio);
-    vTaskDelay(30/portTICK_PERIOD_MS);
-  }
-  vTaskDelete(NULL);
-}
-
-void hvt_event_callback(int avatar_expression, const char* text) {
-  avatar.setExpression((Expression)avatar_expression);
-  avatar.setSpeechText(text);
-}
-
-void avrc_metadata_callback(uint8_t data1, const uint8_t *data2)
-{
-  Serial.printf("AVRC metadata rsp: attribute id 0x%x, %s\n", data1, data2);
-  if (sing_happy) {
-    avatar.setExpression(Expression::Happy);
-  } else {
-    avatar.setExpression(Expression::Neutral);
-  }
-  sing_happy = !sing_happy;
-
-}
 
 // --------------------------------------------------------------------------
 // リマインダーの音・演出
@@ -273,7 +201,7 @@ void onReminder(const CalendarEvent &ev) {
 }
 
 // --------------------------------------------------------------------------
-// カレンダー/APIサービスの開始・停止（Bluetoothモードと排他運用）
+// カレンダー/APIサービスの開始（Wi-Fi接続・時刻同期・取得・API開始）
 // --------------------------------------------------------------------------
 void startCalendarServices() {
   if (calendar_services_running) return;
@@ -297,45 +225,50 @@ void startCalendarServices() {
   avatar.setSpeechText("Calendar Ready");
 }
 
-void stopCalendarServices() {
-  if (!calendar_services_running) return;
-  control_api.stop();
-  WiFi.disconnect(true);
-  WiFi.mode(WIFI_OFF);
-  calendar_services_running = false;
-}
+// --------------------------------------------------------------------------
+// Wi-Fi status indicator (top-left corner of the avatar screen)
+// --------------------------------------------------------------------------
+// Mirrors where the avatar keeps the persistent battery icon (top-right), so
+// the corner is not overwritten by the face animation. Drawn inside a display
+// transaction, only when the state changes or on a periodic refresh.
+void drawWifiIndicator(bool force) {
+  bool connected = (WiFi.status() == WL_CONNECTED);
+  int rssi = connected ? WiFi.RSSI() : 0;
+  int bars = 0;
+  if (connected) {
+    if (rssi >= -55)      bars = 4;
+    else if (rssi >= -65) bars = 3;
+    else if (rssi >= -75) bars = 2;
+    else                  bars = 1;
+  }
+  // Encode the whole visible state in one int so we only repaint on change.
+  int state = connected ? bars : (calendar_services_running ? 0 : -1);
+  if (!force && state == last_wifi_indicator_state) return;
+  last_wifi_indicator_state = state;
 
-void enterBluetoothMode() {
-  if (bluetooth_mode) return;
-  // Wi-Fi and Bluetooth Classic fight over the radio, so shut calendar down.
-  stopCalendarServices();
-  a2dp_sink.set_avrc_metadata_callback(avrc_metadata_callback);
-  a2dp_sink.setHvtEventCallback(hvt_event_callback);
-  a2dp_sink.start(system_config.getBluetoothSetting()->device_name.c_str(), true);
-  avatar.setExpression(Expression::Sad);
-  avatar.setSpeechText("Bluetooth Mode");
-  M5.Speaker.tone(1000, 100);
-  bluetooth_mode = true;
-}
+  const int x0 = 6;    // left margin
+  const int y0 = 6;    // top margin
+  const int bw = 5;    // bar width
+  const int gap = 2;   // gap between bars
+  const int base_y = y0 + 20;
+  const uint16_t dim = 0x39E7;  // dark gray for empty bars
+  const uint16_t on_color = connected ? TFT_GREEN : TFT_RED;
 
-void exitBluetoothMode() {
-  if (!bluetooth_mode) return;
-  avatar.setExpression(Expression::Neutral);
-  avatar.setSpeechText("Calendar Mode");
-  M5.Speaker.tone(800, 100);
-  a2dp_sink.stop();
-  a2dp_sink.end(true);
-  delay(1000);
-  bluetooth_mode = false;
-  startCalendarServices();
-}
-
-void avatarStart() {
-  avatar.start();
-  avatar.addTask(lipSync, "lipSync");
-}
-void avatarStop() {
-  avatar.stop();
+  M5.Display.startWrite();
+  M5.Display.fillRect(x0 - 2, y0 - 2, 4 * (bw + gap) + 4, 26, TFT_BLACK);
+  for (int i = 0; i < 4; i++) {
+    int h = 5 + i * 4;                 // taller bars to the right
+    int bx = x0 + i * (bw + gap);
+    int by = base_y - h;
+    uint16_t c = (i < bars) ? on_color : dim;
+    M5.Display.fillRect(bx, by, bw, h, c);
+  }
+  if (!connected) {
+    // Red slash to make "no link" unmistakable.
+    M5.Display.drawLine(x0 - 1, y0 - 1, x0 + 4 * (bw + gap), base_y, TFT_RED);
+    M5.Display.drawLine(x0 - 1, y0, x0 + 4 * (bw + gap), base_y + 1, TFT_RED);
+  }
+  M5.Display.endWrite();
 }
 
 void setup(void)
@@ -379,14 +312,12 @@ void setup(void)
   // カレンダー接続用の設定ファイルを読み込む。
   CalendarConfigLoader::load(json_fs, calendar_config_yaml, calendar_config);
 
+  // start_volume はSC_BasicConfig.yamlのbluetooth設定から流用する（音量値のみ）。
   M5.Speaker.setVolume(system_config.getBluetoothSetting()->start_volume);
   M5.Speaker.setChannelVolume(system_config.getBluetoothSetting()->start_volume, m5spk_virtual_channel);
 
   // サーボを廃止したので、電源は常に横のコネクタから給電する。
   M5.Power.setExtOutput(true);
-
-  bluetooth_mode = system_config.getBluetoothSetting()->starting_state;
-  Serial.printf("Bluetooth_mode:%s\n", bluetooth_mode ? "true" : "false");
 
   // サーボを使わないのでバッテリーアイコンは常に表示する。
   avatar.setBatteryIcon(true);
@@ -401,7 +332,6 @@ void setup(void)
   avatar.setColorPalette(*cps);
   last_powericon_millis = millis();
 
-  avatar.addTask(lipSync, "lipSync");
   avatar.setExpression(Expression::Neutral);
   avatar.setSpeechFont(system_config.getFont());
 
@@ -421,7 +351,6 @@ void setup(void)
   };
   control_api.testReminder = []() { showReminder("Test reminder"); };
   control_api.refreshCalendar = []() -> bool { return calendar.refresh(); };
-  control_api.bluetoothMode = []() -> bool { return bluetooth_mode; };
 
 #ifdef USE_LED
   FastLED.addLeds<SK6812, LED_PIN, GRB>(leds, NUM_LEDS);  // GRB ordering is typical
@@ -431,36 +360,27 @@ void setup(void)
   turn_off_led();
 #endif
 
-  if (bluetooth_mode) {
-    a2dp_sink.set_avrc_metadata_callback(avrc_metadata_callback);
-    a2dp_sink.setHvtEventCallback(hvt_event_callback);
-    a2dp_sink.start(system_config.getBluetoothSetting()->device_name.c_str(), true);
-    avatar.setExpression(Expression::Sad);
-    avatar.setSpeechText("Bluetooth Mode");
-  } else {
-    // Normal (calendar) mode: connect Wi-Fi, sync time, fetch calendar, API.
-    startCalendarServices();
-  }
+  // Connect Wi-Fi, sync time, fetch the calendar and start the control API.
+  startCalendarServices();
+  drawWifiIndicator(true);
 }
 
 void loop(void)
 {
   M5.update();
 
-  if (M5.BtnA.wasDecideClickCount())
-  {
-    switch (M5.BtnA.getClickCount())
-    {
-    case 1:
-      // シングルクリックでBluetoothスピーカーモードへ。
-      enterBluetoothMode();
-      break;
-
-    case 2:
-      // ダブルクリックでカレンダーモードへ戻る。
-      exitBluetoothMode();
-      break;
-    }
+  if (M5.BtnA.wasPressed()) {
+    // BtnAでリモートカレンダーを手動で再取得する。
+    avatar.setExpression(Expression::Doubt);
+    avatar.setSpeechText("Refreshing...");
+    M5.Speaker.tone(1000, 80);
+    bool ok = calendar.refresh();
+    last_calendar_poll_millis = millis();
+    avatar.setExpression(Expression::Neutral);
+    avatar.setSpeechText(ok ? "Calendar updated" : "Refresh failed");
+    reminder_showing = true;               // reuse the auto-clear timer
+    reminder_shown_millis = millis();
+    drawWifiIndicator(true);
   }
   if (M5.BtnB.wasPressed()) {
     uint8_t volume = M5.Speaker.getChannelVolume(m5spk_virtual_channel);
@@ -481,8 +401,8 @@ void loop(void)
     M5.Speaker.tone(2000, 100);
   }
 
-  // --- カレンダー/APIの定常処理（Bluetoothモード時は動かさない） ---
-  if (!bluetooth_mode && calendar_services_running) {
+  // --- カレンダー/APIの定常処理 ---
+  if (calendar_services_running) {
     control_api.handleClient();
     calendar.update();
 
@@ -499,6 +419,12 @@ void loop(void)
       avatar.setSpeechText("");
       reminder_showing = false;
     }
+  }
+
+  // Wi-Fi status indicator: repaint periodically (redraws only on change).
+  if ((millis() - last_wifi_indicator_millis) > wifi_indicator_interval) {
+    drawWifiIndicator(false);
+    last_wifi_indicator_millis = millis();
   }
 
   if ((millis() - last_powericon_millis) > powericon_interval) {
